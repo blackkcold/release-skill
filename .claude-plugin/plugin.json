@@ -1,0 +1,15 @@
+{
+  "name": "blackkcold-release-skill",
+  "version": "2.0.0",
+  "description": "Universal release automation — auto-detect project type, update CHANGELOG, create GitHub Releases with smart release notes",
+  "author": "杨昊燃",
+  "repository": "https://github.com/blackkcold/release-skill",
+  "license": "MIT",
+  "skills": [
+    {
+      "name": "release",
+      "description": "Universal release automation for any semver project. Auto-detect project type, update CHANGELOG/README, create annotated tags, and generate GitHub Releases with smart release notes.",
+      "triggers": ["release", "发版", "发布", "bump version", "publish", "create release"]
+    }
+  ]
+}
