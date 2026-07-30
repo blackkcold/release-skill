@@ -89,8 +89,8 @@ get_release_command() {
     local version="$2"
     
     # 优先检测项目特定的 release 脚本
-    if [ -f "script/build_and_run_codex.sh" ]; then
-        echo "RELEASE_VERSION=$version bash script/build_and_run_codex.sh release"
+    if [ -f "scripts/release.sh" ]; then
+        echo "bash scripts/release.sh $version"
         return
     fi
     

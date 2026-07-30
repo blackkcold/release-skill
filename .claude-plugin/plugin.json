@@ -2,7 +2,7 @@
   "name": "blackkcold-release-skill",
   "version": "2.0.0",
   "description": "Universal release automation — auto-detect project type, update CHANGELOG, create GitHub Releases with smart release notes",
-  "author": "杨昊燃",
+  "author": "blackkcold",
   "repository": "https://github.com/blackkcold/release-skill",
   "license": "MIT",
   "skills": [
