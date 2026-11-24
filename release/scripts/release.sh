@@ -180,7 +180,7 @@ compute_plan() {
     else
         rc=$?
     fi
-    [ "$rc" -eq 0 ] || die 12 "变更分析失败（analyze-changes.sh exit $rc）"
+    [ "$rc" -eq 0 ] || die 12 "变更分析失败（analyze-changes.sh exit ${rc}）"
 
     P_BASE="$(json_field "$analysis" current "v0.0.0")"
     [ -n "$P_BASE" ] || P_BASE="v0.0.0"
@@ -262,7 +262,7 @@ EOF
         if [ "$FEED_SEED_READY" = "true" ]; then
             P_DELTA_EXPECTATION="上一版产物可获取，预期差分"
         else
-            P_DELTA_EXPECTATION="完整包（$FULL_REASON）"
+            P_DELTA_EXPECTATION="完整包（${FULL_REASON}）"
             P_FULL_REASON="$FULL_REASON"
         fi
     fi
@@ -338,7 +338,7 @@ check_branch() {
     local current
     current="$(current_branch)"
     if [ "$current" != "$P_BRANCH" ]; then
-        die 11 "当前分支是 $current，发版目标是 $P_BRANCH。先执行: git checkout $P_BRANCH"
+        die 11 "当前分支是 ${current}，发版目标是 ${P_BRANCH}。先执行: git checkout $P_BRANCH"
     fi
 }
 
@@ -707,7 +707,7 @@ stage_tag() {
             info "tag $P_VERSION 已存在且指向 HEAD"
             return 0
         fi
-        err "tag $P_VERSION 已存在，指向 $existing（HEAD $head）"
+        err "tag $P_VERSION 已存在，指向 ${existing}（HEAD ${head}）"
         return 12
     fi
     git tag -a "$P_VERSION" -m "$P_VERSION — $P_SUMMARY"
@@ -969,7 +969,7 @@ PY
 run_stage() {
     local name="$1" fn="$2" code="$3" rc
     if [ "$(state_stage_status "$name")" = "done" ]; then
-        info "跳过 $name（已完成）"
+        info "跳过 ${name}（已完成）"
         return 0
     fi
     print_banner "$name"
@@ -981,13 +981,13 @@ run_stage() {
     fi
     if [ "$rc" -ne 0 ]; then
         state_fail "$name" "$rc"
-        err "阶段 $name 失败（exit $rc）"
+        err "阶段 $name 失败（exit ${rc}）"
         printf '下一步: bash %s resume\n' "$RS_ROOT/scripts/release.sh" >&2
         exit "$code"
     fi
     state_stage "$name" "done"
     if [ -n "$THROUGH" ] && [ "$THROUGH" = "$name" ]; then
-        info "已到 --through $name，停止"
+        info "已到 --through ${name}，停止"
         exit 0
     fi
     return 0
@@ -1134,7 +1134,7 @@ PY
         die 20 "Release 已有 ${downloads} 次下载，超过阈值。确认风险后加 --force"
     fi
 
-    info "删除 Release $tag（下载 $downloads 次）"
+    info "删除 Release ${tag}（下载 $downloads 次）"
     provider_release_delete "$tag" || true
     info "删除远端 tag $tag"
     git push origin ":refs/tags/$tag" 2>/dev/null || warn "远端 tag 删除失败（可能被 ruleset 保护）"

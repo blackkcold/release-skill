@@ -166,7 +166,7 @@ state_lock() {
         local pid age now mtime
         pid="$(cat "$STATE_LOCK_DIR/pid" 2>/dev/null || true)"
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            die 11 "另一个发版进程正在运行（pid $pid）。确认已结束后删除 $STATE_LOCK_DIR"
+            die 11 "另一个发版进程正在运行（pid ${pid}）。确认已结束后删除 $STATE_LOCK_DIR"
         fi
         now="$(date +%s)"
         if [ -f "$STATE_LOCK_DIR/created" ]; then

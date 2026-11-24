@@ -67,7 +67,7 @@ build_run() { # build_run <command> <version> <prev>
         rc=$?
     fi
     if [ "$rc" -ne 0 ]; then
-        err "构建失败（exit $rc），日志: $log"
+        err "构建失败（exit ${rc}），日志: $log"
         return "$rc"
     fi
     ok "构建完成"

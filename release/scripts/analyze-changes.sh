@@ -455,5 +455,5 @@ else
 fi
 
 if [[ "$HAS_CONTENT" == "false" ]]; then
-    echo "⚠️  基准（$CURRENT）以来没有任何变更（0 提交、工作区干净），无需发版" >&2
+    echo "⚠️  基准（${CURRENT}）以来没有任何变更（0 提交、工作区干净），无需发版" >&2
 fi

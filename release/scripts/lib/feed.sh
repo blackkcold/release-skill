@@ -72,7 +72,7 @@ feed_seed_previous() { # feed_seed_previous <previous-tag> <dry-run>
     printf '%s\n' "$output" >&2
 
     if [ "$rc" -ne 0 ]; then
-        FULL_REASON="上一版产物就位失败（exit $rc）"
+        FULL_REASON="上一版产物就位失败（exit ${rc}）"
         return 0
     fi
     SEEDED_FROM="$(printf '%s\n' "$output" | sed -n 's/^STAGED_FROM=//p' | tail -1)"
@@ -82,7 +82,7 @@ feed_seed_previous() { # feed_seed_previous <previous-tag> <dry-run>
     [ -n "$SEEDED_FILES" ] || SEEDED_FILES="0"
     [ -n "$FEED_SEED_READY" ] || FEED_SEED_READY="false"
     if [ "$FEED_SEED_READY" != "true" ]; then
-        FULL_REASON="上一版产物取不到（$SEEDED_FROM）"
+        FULL_REASON="上一版产物取不到（${SEEDED_FROM}）"
     fi
     return 0
 }
@@ -94,7 +94,7 @@ feed_generate() { # feed_generate <tag> <previous-tag>
         return 0
     fi
     if [ -z "$FEED_COMMAND" ]; then
-        warn "update_feed=$FEED_KIND，但没有 feed 命令（update_feed_command）"
+        warn "update_feed=${FEED_KIND}，但没有 feed 命令（update_feed_command）"
         FULL_REASON="未配置 feed 命令"
         return 0
     fi
@@ -112,7 +112,7 @@ feed_generate() { # feed_generate <tag> <previous-tag>
         rc=$?
     fi
     if [ "$rc" -ne 0 ]; then
-        err "feed 生成失败（exit $rc）"
+        err "feed 生成失败（exit ${rc}）"
         return 13
     fi
     FEED_FILE="$(feed_locate_file)"

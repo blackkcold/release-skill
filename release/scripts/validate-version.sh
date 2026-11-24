@@ -82,7 +82,7 @@ if [[ "$V_NORM" =~ ^[0-9]+\.[0-9]+\.[0-9]+-(dev|pre|beta|rc)\.[0-9]+$ ]]; then
             fi
             fail "同一 base 的预发布序号未递增"
         elif ver_gt "$V_BASE" "$L_DEVBASE"; then
-            echo "✅ 预发布基线提升: $LATEST_TAG → $VERSION（序号重置为 1）"
+            echo "✅ 预发布基线提升: $LATEST_TAG → ${VERSION}（序号重置为 1）"
             exit 0
         fi
         fail "预发布 base 不能低于最近 dev 基线"
