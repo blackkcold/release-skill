@@ -83,14 +83,53 @@ get_build_command() {
     esac
 }
 
+# 获取自更新 feed 类型：sparkle | electron | none | custom
+detect_update_feed() {
+    if [ -f "Package.swift" ] && grep -qi 'sparkle' Package.swift 2>/dev/null; then
+        echo "sparkle"
+        return
+    fi
+
+    if [ -f "scripts/appcast.sh" ] || [ -f "appcast.xml" ]; then
+        echo "sparkle"
+        return
+    fi
+
+    if [ -f "package.json" ] && grep -qE '"(electron-builder|electron-updater)"' package.json 2>/dev/null; then
+        echo "electron"
+        return
+    fi
+
+    # Tauri v2 的 updater 没有差分，只需要签名 feed
+    if [ -f "src-tauri/tauri.conf.json" ] || [ -f "tauri.conf.json" ]; then
+        echo "none"
+        return
+    fi
+
+    echo "none"
+}
+
+# 生成 feed 的命令（空 = 由配置 update_feed_command 决定）
+detect_update_feed_command() {
+    if [ -f "scripts/appcast.sh" ]; then
+        echo "bash scripts/appcast.sh"
+        return
+    fi
+    if [ -f "scripts/generate-appcast.sh" ]; then
+        echo "bash scripts/generate-appcast.sh"
+        return
+    fi
+    echo ""
+}
+
 # 获取 release 命令
 get_release_command() {
     local project_type="$1"
     local version="$2"
     
     # 优先检测项目特定的 release 脚本
-    if [ -f "scripts/release.sh" ]; then
-        echo "bash scripts/release.sh $version"
+    if [ -f "script/build_and_run_codex.sh" ]; then
+        echo "RELEASE_VERSION=$version bash script/build_and_run_codex.sh release"
         return
     fi
     
@@ -112,8 +151,12 @@ get_release_command() {
 PROJECT_TYPE=$(detect_project_type)
 BUILD_COMMAND=$(get_build_command "$PROJECT_TYPE" "")
 RELEASE_COMMAND=$(get_release_command "$PROJECT_TYPE" "")
+UPDATE_FEED=$(detect_update_feed)
+UPDATE_FEED_COMMAND=$(detect_update_feed_command)
 
 # 输出结果
 echo "PROJECT_TYPE=$PROJECT_TYPE"
 echo "BUILD_COMMAND=$BUILD_COMMAND"
 echo "RELEASE_COMMAND=$RELEASE_COMMAND"
+echo "UPDATE_FEED=$UPDATE_FEED"
+echo "UPDATE_FEED_COMMAND=$UPDATE_FEED_COMMAND"

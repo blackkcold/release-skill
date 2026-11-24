@@ -1,5 +1,5 @@
 #!/bin/bash
-# Usage: generate-notes.sh <changelog> <version> [--style auto|bilingual|simple|changelog]
+# Usage: generate-notes.sh <changelog> <version> [--style auto|bilingual|simple|changelog|structured-cn]
 # Style auto-detection: .release.json → GitHub Releases API analysis → fallback "simple"
 set -euo pipefail
 
@@ -17,7 +17,7 @@ while [[ $# -gt 0 ]]; do
         --owner) OWNER="$2"; shift 2 ;;
         --repo) REPO="$2"; shift 2 ;;
         --help|-h)
-            echo "Usage: $0 <changelog> <version> [--style auto|bilingual|simple|changelog]"
+            echo "Usage: $0 <changelog> <version> [--style auto|bilingual|simple|changelog|structured-cn]"
             exit 0
             ;;
         *) shift ;;
@@ -56,6 +56,9 @@ print(' '.join([r.get('body','') for r in releases[:3]]))
 
     if [[ "${cjk_count:-0}" -gt 50 ]] && [[ "${latin_count:-0}" -gt 100 ]]; then
         echo "bilingual"; return 0
+    fi
+    if echo "$bodies" | grep -qE '(🐛|✨|🔧|🔐|♿)' 2>/dev/null; then
+        echo "structured-cn"; return 0
     fi
     if echo "$bodies" | grep -q '## \[' 2>/dev/null; then
         echo "changelog"; return 0
@@ -135,6 +138,87 @@ ${CHANGELOG_ENTRY}
 
 **Full Changelog**: https://github.com/${OWNER}/${REPO}/compare/${PREV_VERSION}...${VERSION}
 EOF
+        ;;
+    structured-cn)
+        subjects=""
+        if command -v git &>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
+            if git rev-parse --verify --quiet "${PREV_VERSION}^{commit}" >/dev/null 2>&1; then
+                subjects=$(git log "${PREV_VERSION}..HEAD" --no-merges --format='%s' 2>/dev/null || true)
+            else
+                subjects=$(git log HEAD --no-merges --format='%s' 2>/dev/null || true)
+            fi
+        fi
+
+        if [[ -n "$subjects" ]]; then
+            grouped=$(printf '%s\n' "$subjects" | python3 -c '
+import re, sys
+
+GROUPS = [
+    ("feat",     "✨", "新增"),
+    ("fix",      "🐛", "修复"),
+    ("perf",     "⚡", "性能优化"),
+    ("refactor", "♻️", "重构"),
+    ("docs",     "📝", "文档"),
+    ("test",     "✅", "测试"),
+    ("ci",       "🔄", "CI/CD"),
+    ("build",    "📦", "构建"),
+    ("security", "🔐", "安全"),
+    ("release",  "🚀", "发布"),
+    ("chore",    "🔧", "改进"),
+    ("other",    "🔧", "其他"),
+]
+LABEL = {key: (emoji, title) for key, emoji, title in GROUPS}
+ORDER = [key for key, _, _ in GROUPS]
+buckets = {key: [] for key in ORDER}
+PAT = re.compile(r"^([a-zA-Z]+)(\([^)]*\))?(!)?:\s*(.*)$")
+
+for line in sys.stdin:
+    subject = line.strip()
+    if not subject:
+        continue
+    match = PAT.match(subject)
+    key, text = "other", subject
+    if match:
+        t = match.group(1).lower()
+        if t in LABEL:
+            key = t
+        text = match.group(4)
+    text = text.strip().rstrip("。.")
+    if text:
+        text = text[0].upper() + text[1:]
+    buckets[key].append(text)
+
+out = []
+for key in ORDER:
+    items = [i for i in buckets[key] if i]
+    if not items:
+        continue
+    emoji, title = LABEL[key]
+    out.append(f"{emoji} {title}")
+    out.extend(f"- {i}" for i in items)
+    out.append("")
+print("\n".join(out).strip())
+')
+            cat <<EOF
+${VERSION} — ${SUMMARY_ZH:-发布}
+
+${grouped}
+
+---
+
+**Full Changelog**: https://github.com/${OWNER}/${REPO}/compare/${PREV_VERSION}...${VERSION}
+EOF
+        else
+            cat <<EOF
+${VERSION} — ${SUMMARY_ZH:-发布}
+
+${CHANGELOG_ENTRY}
+
+---
+
+**Full Changelog**: https://github.com/${OWNER}/${REPO}/compare/${PREV_VERSION}...${VERSION}
+EOF
+        fi
         ;;
     *)
         echo "⚠️  Unknown style '$RESOLVED_STYLE', falling back to simple" >&2

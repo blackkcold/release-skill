@@ -1,208 +1,160 @@
 # Release - 通用发版助手
 
-自动化版本发布流程，适用于任何使用语义化版本的项目。
+自动完成语义化版本发布：分析待发变更 → 判定版本号 → 更新文档 → 提交 → 打 tag → 推送 → 构建 → 创建 GitHub Release → PR 处理。支持双轨：默认发到 `develop`（预发布），发布后主动推荐并询问是否把已验收变更 `cherry-pick` 同步到 `main`（稳定版）。
 
-## 功能特性
+主定义见 [SKILL.md](SKILL.md)，此处只列快速上手与脚本接口。
 
-- ✅ 自动检测项目类型（Swift、Node.js、Rust、Go、Python 等）
-- ✅ 支持项目根目录配置文件（`.release.json`）
-- ✅ 自动更新 CHANGELOG.md、README.md
-- ✅ **一致性原则** — Release Note 标题、格式、结构从历史 Release 推断，配置仅作为 fallback
-- ✅ **智能 Release Note 生成** — 自动检测历史格式，支持 bilingual/simple/changelog/structured-cn 四种模式
-- ✅ 可选创建 release/vX.Y.Z 分支
-- ✅ 自动打 annotated tag
-- ✅ 可选本地构建
-- ✅ 支持 CI/CD 模式（本地/CI/自动）
-- ✅ 自动创建 GitHub Release
-
-## 使用方法
-
-### 基本发版
+## 快速上手
 
 ```bash
-# 自动递增 PATCH 版本
+# 自动判定版本（分析变更后给出建议，一次确认）
 skill(name="release", user_message="发版")
 
-# 指定版本号
-skill(name="release", user_message="发版 v0.9.2")
+# 双轨口令
+skill(name="release", user_message="发版到 main")      # 直接走稳定线
+skill(name="release", user_message="发版并同步 main")  # dev 发布后直接进入同步清单选择
 
-# 带摘要
+# 指定版本号（覆盖自动判定）
 skill(name="release", user_message="发版 v0.9.2 备份管理 bug 修复")
 
-# 强制使用配置格式（跳过历史一致性检测）
-skill(name="release", user_message="发版 v0.9.2 --force-config")
+# 试运行：只输出计划，不写任何东西
+skill(name="release", user_message="发版 --dry-run")
+
+# 版本级覆盖
+skill(name="release", user_message="发大版本")     # 强制 MINOR
+skill(name="release", user_message="发重大更新")   # 强制 MAJOR
 
 # 英文触发
 skill(name="release", user_message="release v0.9.2")
-skill(name="release", user_message="bump version")
 ```
 
-### 试运行
+## 版本判定
+
+由 `scripts/analyze-changes.sh` 分析「上个 tag 之后的提交 + 工作区未提交变更（含未跟踪）」后给出建议：
+
+| 条件 | bump |
+|---|---|
+| `BREAKING_COUNT > 0`（`type!:` 或 body 含 `BREAKING CHANGE`） | MAJOR |
+| `FEAT_COUNT > 0` | MINOR |
+| 其余（fix / docs / refactor / chore / 无前缀） | PATCH |
+| 无任何变更 | 停止，提示无需发版 |
+
+用户显式给出的版本号优先级最高。
+
+双轨版本号：
+
+| 线 | 版本号 | 规则 |
+|---|---|---|
+| develop | `vX.Y.Z-dev.N` | base 只升不降；级别升高即 base 提升且 `N=1`，否则 `N+1` |
+| main | `vX.Y.Z` | 由所选 cherry-pick 内容独立判定，不继承 dev 版本号 |
+
+`--target develop|stable` 决定基线（最近 dev tag / 最近稳定 tag）；`--sync-candidates` 输出「已发 dev、未进 main」的候选集 JSON。
+
+## 流程与闸门
+
+```
+Phase 1  环境 + 变更分析 → Phase 2 🔒Gate1 计划确认 → Phase 3 文档更新
+→ Phase 4 一次 release 提交（白名单 add）→ Phase 5 🔒干净闸门
+→ Phase 6 🔒Gate2 对外操作确认 → Phase 6.5 差分准备（上一版产物就位）
+→ Phase 7 tag/push/构建/feed/差分判定/Release
+→ Phase 8 PR 处理 → Phase 9 🔒收尾干净复核
+
+双轨同步（仅 develop 线发布成功后，main_sync≠never）:
+Phase S1 渲染同步推荐页 → Phase S2 🔒同步决策（全选/自选/跳过）
+→ Phase S3 sync 分支 cherry-pick -x → PR → CI 合并 → tag vX.Y.Z → Stable Release
+```
+
+- **Gate 1**：一次问全（目标线/版本+理由、变更统计、待提交文件清单、文档、构建命令、**更新包预期**、Release 预览、PR 模式）
+- **Gate 2**：tag + push + 构建 + feed/差分 + Release 一次打包确认（走 PR 的线先合并 PR 再打 tag）
+- **同步决策**：三档推荐（✅强推荐 / ❓待确认 / ⛔排除），用 question 工具全选/自选/跳过
+- **干净闸门**：`git status --porcelain`（含未跟踪、排除 `ignore_dirty`）必须为空，否则停止
+
+## 差分更新（自更新）
+
+构建产物被 gitignore，新 worktree / CI / 另一台机器默认没有上一版产物，feed 生成器会**静默退回完整包**。所以发版流程里有两步是固定动作：
 
 ```bash
-skill(name="release", user_message="发版 v0.9.2 --dry-run")
+# 1. 构建前：上一版产物就位（local → --source-dir → gh release download）
+bash scripts/seed-update-artifacts.sh --previous v1.3.2
+# → STAGED_FROM=local|source-dir|github|none · DELTA_READY=true|false
+
+# 2. feed 生成后：确认真的产出了差分
+bash scripts/check-update-delta.sh --version v1.4.0 --feed release/1.4.0/appcast.xml --archive release/appcast
+# → DELTA_KIND=sparkle|electron|none · DELTA_READY=true|false
 ```
 
-## 配置文件
+| 策略 | 行为 |
+|---|---|
+| `delta_strategy=auto`（默认） | 没有差分也发版，但 Gate 2 与报告必须写明「完整包 + 原因」 |
+| `delta_strategy=always` | `--require`，没有差分就停止 |
+| `delta_strategy=off` | 不尝试、不检测 |
 
-在项目根目录创建 `.release.json`：
+下载中断会留下截断文件；发布方提供 `<产物>.sha256` 时脚本会校验并在不匹配时删除，避免用坏产物生成差分。
 
-```json
-{
-  "repo": "owner/repo",
-  "tag_prefix": "v",
-  "build_command": "npm run build",
-  "release_command": null,
-  "test_command": null,
-  "docs": ["CHANGELOG.md", "README.md"],
-  "changelog_format": "keep-a-changelog",
-  "ci_mode": "local",
-  "release_branch": true,
-  "auto_merge": false,
-  "release_note_style": "auto"
-}
-```
+## 脚本
 
-### 配置优先级
+| 脚本 | 用途 |
+|---|---|
+| `scripts/analyze-changes.sh` | 变更分析 + 版本建议（`--base`、`--json`、`--target develop\|stable`、`--sync-candidates`） |
+| `scripts/validate-version.sh` | 版本号格式与递增校验（稳定 `vX.Y.Z` / 预发布 `vX.Y.Z-dev.N`，`--target`） |
+| `scripts/detect-project.sh` | 项目类型、构建命令与自更新类型检测（`UPDATE_FEED` / `UPDATE_FEED_COMMAND`） |
+| `scripts/generate-notes.sh` | Release Note 生成（`--style auto\|bilingual\|simple\|changelog\|structured-cn`） |
+| `scripts/seed-update-artifacts.sh` | 取上一版产物供差分使用（本地 → `--source-dir` → `gh release download`，含 sha256 校验） |
+| `scripts/check-update-delta.sh` | 判定 feed 是否真的带差分（Sparkle `deltaFrom` / Electron `blockmap`），`--require` 时无差分即失败 |
 
-```
-1. 项目根目录 .release.json（最高优先级）
-2. 项目根目录 release.config.json
-3. ~/.config/opencode/release.json（全局配置）
-4. 自动检测（无配置文件时）
-```
+## PR 处理
 
-### 字段说明
+| 场景 | 行为 |
+|---|---|
+| A. 发版走 PR（`pr_flow: always`） | 创建/检测 `release/vX.Y.Z[-dev.N] → {目标分支}`；CI 通过且无冲突 → 自动合并；有冲突 → 展示 PR 摘要确认后再处理；CI 失败 → 先诊断，需改源码则停 |
+| B. 发版后仓库卫生（收尾固定） | 扫描已合并/落后/stale PR 与分支，**只出清单 + 建议命令，不执行删除**；从不自动合并 |
 
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `repo` | string | 自动检测 | GitHub 仓库 `owner/repo` |
-| `tag_prefix` | string | `"v"` | Tag 前缀，如 `v1.0.0` |
-| `build_command` | string\|null | 自动检测 | 构建命令 |
-| `release_command` | string\|null | null | 发布命令（优先于 build_command） |
-| `test_command` | string\|null | null | 测试命令（可选） |
-| `docs` | string[] | `["CHANGELOG.md"]` | 需更新的文档列表 |
-| `changelog_format` | string | `"keep-a-changelog"` | CHANGELOG 格式 |
-| `ci_mode` | string | `"local"` | CI/CD 模式 |
-| `release_branch` | boolean | true | 是否创建 release 分支 |
-| `auto_merge` | boolean | false | 是否自动合并到 main（不推荐） |
+## 配置
 
-## 工作流程
+项目根目录 `.release.json`（优先）→ `release.config.json` → `~/.config/opencode/release.json` → 自动检测。
 
-1. **环境检测**：检测 Git 仓库、GitHub remote、加载配置
-2. **文档更新**：自动更新 CHANGELOG、README（如存在）
-3. **创建分支**：可选创建 release/vX.Y.Z 分支
-4. **打 Tag**：在当前分支打 annotated tag（需确认）
-5. **推送**：推送 tag 和分支到 origin（需确认）
-6. **本地构建**：可选执行构建命令（需确认）
-7. **创建 Release**：生成 Release Note 并创建 GitHub Release（需确认）
+新增字段：
 
-## CI/CD 模式
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `pr_flow` | `auto` | `always` / `never` / `auto`（检测 workflows、保护分支） |
+| `pr_cleanup` | `report` | `report` 只出清单；`off` 跳过 |
+| `pr_cleanup_stale_days` | 30 | stale PR 阈值 |
+| `target_branch` | `auto` | 默认发版目标：`auto` 检测到 `develop` 即走双轨；也可显式写分支名 |
+| `stable_branch` | `main` | 稳定发布分支 |
+| `tag_prefix` | `v` | tag 前缀；脚本按首个数字解析，支持 `v` / `rel-` 等任意前缀 |
+| `dev_tag_suffix` | `-dev` | 预发布后缀（`vX.Y.Z-dev.N`） |
+| `experimental_paths` | `[]` | 实验目录 glob，命中强制留 develop |
+| `experimental_keywords` | `["experimental","prototype","preview","draft","wip"]` | 实验关键词兜底（匹配提交与改动路径） |
+| `main_sync` | `ask` | `ask` 每次询问是否同步 main；`never` 从不询问 |
+| `build_command_dev` / `build_command_stable` | 继承 `build_command` | 双线构建差异（如不同产物命名或参数） |
+| `update_feed` | `auto` | `auto`/`sparkle`/`electron`/`custom`/`none` |
+| `update_feed_command` | null | 生成 feed 的命令（如 `scripts/appcast.sh`） |
+| `update_archive_dir` | `release/updates` | feed 与差分资产目录 |
+| `update_artifact_glob` | `*.dmg,*.zip,*.exe,*.AppImage,*.tar.gz,*.pkg` | 从上一版取回的产物 |
+| `delta_strategy` | `auto` | `auto` / `always` / `off` |
+| `delta_max` | 2 | 最大差分数量 |
+| `ignore_dirty` | `[".release.json",".DS_Store","tmp/","*.log"]` | 不计入「脏」的路径 |
 
-| 模式 | 行为 | 适用场景 |
-|------|------|---------|
-| `local` | 本地完成全流程（默认） | 无 CI/CD 的项目 |
-| `ci` | 只打 tag 和推送，由 CI 完成构建和发布 | 有 GitHub Actions 等 |
-| `auto` | 自动检测 `.github/workflows` 存在则用 CI 模式 | 智能切换 |
+完整字段与示例见 [SKILL.md](SKILL.md) 与 `config/projects.json`。
 
 ## 安全边界
 
-- ✅ 文档更新：自动执行
-- ✅ 创建分支：自动执行（如启用）
-- ⚠️ Git 操作：需用户确认（tag、push）
-- ⚠️ 本地构建：需用户确认
-- ⚠️ GitHub Release：需用户确认
-- ❌ 合并到 main：不自动执行，用户手动合并
-
-## 自动检测支持的项目类型
-
-| 项目特征 | 构建命令 |
-|---------|---------|
-| `Package.swift` | `swift build -c release` |
-| `package.json` + `build` script | `npm run build` |
-| `Cargo.toml` | `cargo build --release` |
-| `go.mod` | `go build -o ./release/` |
-| `pyproject.toml` | `python -m build` |
-| `Makefile` + `build` target | `make build` |
-| `build.gradle` / `build.gradle.kts` | `./gradlew build` |
-| `pubspec.yaml` | `flutter build` |
-| `mix.exs` | `mix release` |
-
-## 版本号规则
-
-- **vX.Y.Z**：标准语义化版本
-- **MAJOR**：大重构 / 不兼容变更
-- **MINOR**：新功能
-- **PATCH**：Bug 修复
-
-自动递增规则：
-- 用户指定版本：使用用户指定的
-- 用户说"发版"但未指定：自动递增 PATCH
-- 用户说"大版本"：递增 MINOR
-- 用户说"重大更新"：递增 MAJOR
+- ✅ 自动：读取配置/文档、变更分析、生成同步候选、文档更新、创建分支、白名单提交、拉取上一版产物（只读下载）
+- ⚠️ 需确认：打 tag、推送、本地构建、生成并上传 feed 与差分、创建 Release（Gate 2 一次打包）；场景 A 有冲突时的合并；cherry-pick 同步（同步决策闸门）
+- ⚠️ 自动：场景 A 无冲突且 CI 通过时的合并
+- 📄 只出清单：场景 B 清理
+- ❌ 禁止：整支合并 `develop → main`；force push
+- ❌ 不执行：修改源代码（cherry-pick 重建提交、冲突消解需确认）
 
 ## 文件结构
 
 ```
 release/
-├── SKILL.md                    # Skill 主定义文件
-├── config/
-│   └── projects.json           # 示例配置（非硬编码）
-├── templates/
-│   ├── release-note.md         # Release Note 模板
-│   └── changelog-entry.md      # CHANGELOG 条目模板
-└── scripts/
-    ├── validate-version.sh     # 版本号验证
-    ├── detect-project.sh       # 项目类型检测
-    └── generate-notes.sh       # Release Note 生成
-```
-
-## 错误处理
-
-| 错误场景 | 处理方式 |
-|---------|---------|
-| 不是 Git 仓库 | 提示用户切换到项目目录 |
-| 没有 GitHub remote | 提示用户添加 remote |
-| 版本号格式错误 | 提示正确格式 vX.Y.Z |
-| 版本已存在 | 提示冲突，建议新版本号 |
-| CHANGELOG 无 Unreleased | 提示先添加变更记录 |
-| Git 工作区不干净 | 提示先提交或 stash |
-| 构建失败 | 提示构建错误，询问是否继续 |
-| 推送失败 | 提示网络问题，建议重试 |
-| Release 创建失败 | 提示手动兜底方案 |
-
-## 输出示例
-
-```
-📋 发版报告 - v0.9.2
-
-✅ 文档更新:
-   - CHANGELOG.md: Unreleased → v0.9.2
-   - README.md: 更新版本引用
-
-✅ Tag:
-   - Tag: v0.9.2
-   - 推送: 已推送到 origin
-
-✅ Release 分支（如启用）:
-   - 分支: release/v0.9.2
-   - 推送: 已推送到 origin
-
-✅ 本地构建（如执行）:
-   - 命令: npm run build
-   - 状态: 成功
-
-✅ GitHub Release:
-   - URL: https://github.com/owner/repo/releases/tag/v0.9.2
-   - Release Note: 已生成
-
-⚠️ 待办（如启用 release_branch）:
-   - 手动合并 release/v0.9.2 到 main:
-     git checkout main
-     git merge release/v0.9.2 --no-edit
-     git push origin main
-
-📌 下一步:
-   - 验证 GitHub Release 页面
-   - 开始下一版本开发: v0.9.3
+├── SKILL.md                 # Skill 主定义
+├── README.md                # 快速上手（本文件）
+├── config/projects.json     # 配置示例（非硬编码）
+├── templates/               # Release Note / CHANGELOG 模板
+└── scripts/                 # analyze-changes / validate-version / detect-project / generate-notes
+                             # / seed-update-artifacts / check-update-delta
 ```

@@ -105,3 +105,51 @@ Detection signal: release body starts with `## [v` or matches Keep-a-Changelog f
 
 **Full Changelog**: https://github.com/{owner}/{repo}/compare/{prev_version}...{version}
 ```
+
+---
+
+## Variant: `structured-cn`
+
+For Chinese projects grouped into emoji sections. Detection signal: release body
+contains emoji group headings (🐛 / ✨ / 🔧 / 🔐 / ♿) without English counterparts.
+
+```markdown
+v{version} — {summary_zh}
+
+✨ 新增
+- {feat point}
+
+🐛 修复
+- {fix point}
+
+🔧 改进
+- {other point}
+
+---
+
+**Full Changelog**: https://github.com/{owner}/{repo}/compare/{prev_version}...{version}
+```
+
+### Grouping
+
+`scripts/generate-notes.sh --style structured-cn` groups commits from
+`{prev_version}..HEAD --no-merges` by Conventional Commits prefix:
+
+| Prefix | Emoji | Section |
+|--------|-------|---------|
+| `feat:` | ✨ | 新增 |
+| `fix:` | 🐛 | 修复 |
+| `perf:` | ⚡ | 性能优化 |
+| `refactor:` | ♻️ | 重构 |
+| `docs:` | 📝 | 文档 |
+| `test:` | ✅ | 测试 |
+| `ci:` | 🔄 | CI/CD |
+| `build:` | 📦 | 构建 |
+| `security:` | 🔐 | 安全 |
+| `release:` | 🚀 | 发布 |
+| `chore:` | 🔧 | 改进 |
+| no prefix | 🔧 | 其他 |
+
+Prefixes are stripped, first letter upper-cased, trailing period removed.
+If no git history is available the generator falls back to the CHANGELOG entry.
+

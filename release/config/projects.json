@@ -1,12 +1,61 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "release_note_styles": {
-    "auto": "Auto-detect from historical GitHub Releases (default)",
-    "bilingual": "Bilingual (Chinese/English) format with section-by-section structure",
-    "simple": "Single-language format with 'Changes' and 'Validation' sections",
-    "changelog": "Raw CHANGELOG entry dump with Full Changelog link"
+    "auto": "从历史 GitHub Release 自动推断（默认）",
+    "bilingual": "中英双语，分组标题中英对照",
+    "structured-cn": "结构化中文 emoji 分组（按 commit 前缀自动归类）",
+    "simple": "单语言，Changes + Validation 两段式",
+    "changelog": "直接使用 CHANGELOG 条目原文 + Full Changelog 链接"
+  },
+  "pr_flow_values": {
+    "auto": "检测到 .github/workflows 或保护分支时启用 PR 流程",
+    "always": "发版必经 PR：release/vX.Y.Z[-dev.N] → 目标分支，CI 通过后合并",
+    "never": "不走 PR，直接在当前分支发版"
+  },
+  "update_feed_values": {
+    "auto": "按依赖与脚本检测（Sparkle / electron-builder / Tauri）",
+    "sparkle": "Sparkle appcast + *.delta",
+    "electron": "electron-updater latest*.yml + *.blockmap",
+    "custom": "由 update_feed_command 自行生成，脚本只做 DELTA_READY 判定",
+    "none": "无自更新，跳过 feed 与差分"
+  },
+  "delta_strategy_values": {
+    "auto": "尝试产出差分；取不到时允许完整包，但计划与报告必须写明原因",
+    "always": "必须产出差分，check-update-delta.sh --require 失败即停止",
+    "off": "不尝试差分，也不检测"
+  },
+  "dual_track_values": {
+    "target_branch": "auto 检测到 develop 即走双轨；也可显式写分支名",
+    "stable_branch": "稳定发布分支，默认 main",
+    "dev_tag_suffix": "预发布后缀，默认 -dev（vX.Y.Z-dev.N）",
+    "experimental_paths": "实验目录 glob，命中强制留 develop（优先于关键词）",
+    "experimental_keywords": "实验关键词兜底，匹配提交标题/正文与改动路径",
+    "main_sync": "ask 每次发布后询问是否同步 main；never 从不询问",
+    "build_command_dev / build_command_stable": "双线构建差异，未设置时继承 build_command"
   },
   "examples": {
+    "dual-track-project": {
+      "repo": "owner/repo",
+      "tag_prefix": "v",
+      "build_command": "docker build -t app:dev .",
+      "build_command_dev": "docker build -t app:dev .",
+      "build_command_stable": "docker build -t app:stable .",
+      "docs": ["CHANGELOG.md", "README.md"],
+      "changelog_format": "keep-a-changelog",
+      "release_note_style": "structured-cn",
+      "ci_mode": "auto",
+      "release_branch": true,
+      "target_branch": "auto",
+      "stable_branch": "main",
+      "dev_tag_suffix": "-dev",
+      "experimental_paths": ["src/experimental/"],
+      "experimental_keywords": ["p2p", "webrtc", "stun", "turn", "experimental"],
+      "main_sync": "ask",
+      "pr_flow": "always",
+      "pr_cleanup": "report",
+      "pr_cleanup_stale_days": 30,
+      "ignore_dirty": [".release.json", ".DS_Store", "tmp/", "*.log"]
+    },
     "swift-project": {
       "repo": "owner/repo",
       "tag_prefix": "v",
@@ -18,7 +67,43 @@
       "release_note_style": "auto",
       "ci_mode": "local",
       "release_branch": true,
-      "auto_merge": false
+      "summary": "",
+      "summary_en": "",
+      "validation": "",
+      "target_branch": "auto",
+      "stable_branch": "main",
+      "dev_tag_suffix": "-dev",
+      "experimental_paths": [],
+      "experimental_keywords": ["experimental"],
+      "main_sync": "ask",
+      "pr_flow": "auto",
+      "pr_cleanup": "report",
+      "pr_cleanup_stale_days": 30,
+      "ignore_dirty": [".release.json", ".DS_Store", "tmp/", "*.log"]
+    },
+    "macos-sparkle-project": {
+      "repo": "owner/repo",
+      "tag_prefix": "v",
+      "build_command": "scripts/build.sh",
+      "release_command": "scripts/release.sh",
+      "test_command": "swift test",
+      "docs": ["RELEASE_NOTES.md", "README.md"],
+      "changelog_format": "custom",
+      "release_note_style": "structured-cn",
+      "ci_mode": "local",
+      "release_branch": true,
+      "target_branch": "main",
+      "stable_branch": "main",
+      "main_sync": "never",
+      "pr_flow": "auto",
+      "pr_cleanup": "report",
+      "update_feed": "sparkle",
+      "update_feed_command": "scripts/appcast.sh",
+      "update_archive_dir": "release/appcast",
+      "update_artifact_glob": "*.dmg,*.sha256",
+      "delta_strategy": "auto",
+      "delta_max": 2,
+      "ignore_dirty": [".release.json", ".DS_Store", "tmp/", "*.log"]
     },
     "node-project": {
       "repo": "owner/repo",
@@ -28,12 +113,21 @@
       "test_command": "npm test",
       "docs": ["CHANGELOG.md", "README.md"],
       "changelog_format": "keep-a-changelog",
-      "release_note_style": "auto",
+      "release_note_style": "structured-cn",
       "ci_mode": "auto",
       "release_branch": true,
-      "auto_merge": false
+      "target_branch": "auto",
+      "stable_branch": "main",
+      "dev_tag_suffix": "-dev",
+      "experimental_paths": ["src/experimental/"],
+      "experimental_keywords": ["experimental"],
+      "main_sync": "ask",
+      "pr_flow": "always",
+      "pr_cleanup": "report",
+      "pr_cleanup_stale_days": 30,
+      "ignore_dirty": [".release.json", ".DS_Store", "tmp/", "*.log", "node_modules/", "dist/"]
     },
-    "ci-project": {
+    "single-branch-project": {
       "repo": "owner/repo",
       "tag_prefix": "v",
       "build_command": null,
@@ -44,7 +138,16 @@
       "release_note_style": "changelog",
       "ci_mode": "ci",
       "release_branch": false,
-      "auto_merge": false
+      "target_branch": "main",
+      "stable_branch": "main",
+      "dev_tag_suffix": "-dev",
+      "experimental_paths": [],
+      "experimental_keywords": [],
+      "main_sync": "never",
+      "pr_flow": "never",
+      "pr_cleanup": "off",
+      "pr_cleanup_stale_days": 30,
+      "ignore_dirty": [".release.json", ".DS_Store", "tmp/", "*.log"]
     }
   }
 }
