@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+      - name: ShellCheck
+        run: |
+          find release tests scripts -type f -name '*.sh' -print0 | xargs -0 shellcheck -S error
+      - name: Parse
+        run: |
+          find release tests scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: bash tests/run.sh
+
+  version-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version source
+        run: bash scripts/check-version-sync.sh
+
+  ci:
+    name: ci
+    needs: [lint, test, version-sync]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "all checks passed"

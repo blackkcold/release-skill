@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# tests/stub/gh - minimal gh CLI stub used by the test suite.
+#
+# It records releases under $GH_STUB_DIR and computes real sha256 digests so
+# `release.sh verify` can compare them. It never touches the network.
+set -euo pipefail
+
+STATE="${GH_STUB_DIR:?GH_STUB_DIR is required}"
+mkdir -p "$STATE"
+
+CMD="${1:-}"
+[ "$#" -gt 0 ] && shift
+
+case "$CMD" in
+    auth)
+        exit 0
+        ;;
+    release)
+        SUB="${1:-}"
+        shift || true
+        case "$SUB" in
+            view)
+                TAG="${1:-}"
+                shift || true
+                JSON=""
+                JQ=""
+                while [ "$#" -gt 0 ]; do
+                    case "$1" in
+                        --repo) shift 2 ;;
+                        --json) JSON="${2:-}"; shift 2 ;;
+                        --jq) JQ="${2:-}"; shift 2 ;;
+                        *) shift ;;
+                    esac
+                done
+                FILE="$STATE/release-$TAG.json"
+                [ -f "$FILE" ] || exit 1
+                if [ -n "$JQ" ]; then
+                    case "$JQ" in
+                        *downloadCount*)
+                            printf '0\n'
+                            ;;
+                        '.createdAt')
+                            python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["createdAt"])' "$FILE"
+                            ;;
+                        *)
+                            python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("tagName",""))' "$FILE"
+                            ;;
+                    esac
+                elif [ "$JSON" = "assets" ]; then
+                    python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(json.dumps({"assets":d.get("assets",[])},ensure_ascii=False))' "$FILE"
+                elif [ "$JSON" = "tagName" ]; then
+                    python3 -c 'import json,sys;print(json.dumps({"tagName":json.load(open(sys.argv[1])).get("tagName","")}))' "$FILE"
+                else
+                    cat "$FILE"
+                fi
+                ;;
+            create)
+                TAG="${1:-}"
+                shift || true
+                TITLE="$TAG"
+                NOTES=""
+                PRE="false"
+                ASSETS=()
+                while [ "$#" -gt 0 ]; do
+                    case "$1" in
+                        --repo) shift 2 ;;
+                        --title) TITLE="${2:-}"; shift 2 ;;
+                        --notes-file) NOTES="${2:-}"; shift 2 ;;
+                        --prerelease) PRE="true"; shift ;;
+                        *) ASSETS+=("$1"); shift ;;
+                    esac
+                done
+                if [ "${#ASSETS[@]}" -gt 0 ]; then
+                    python3 - "$STATE/release-$TAG.json" "$TAG" "$TITLE" "$PRE" "${ASSETS[@]}" <<'PY'
+import datetime, hashlib, json, os, sys
+path, tag, title, pre = sys.argv[1:5]
+rows = []
+for item in sys.argv[5:]:
+    if not os.path.isfile(item):
+        continue
+    with open(item, "rb") as fh:
+        digest = hashlib.sha256(fh.read()).hexdigest()
+    rows.append({
+        "name": os.path.basename(item),
+        "size": os.path.getsize(item),
+        "digest": "sha256:" + digest,
+        "downloadCount": 0,
+    })
+data = {
+    "tagName": tag,
+    "name": title,
+    "body": "",
+    "isPrerelease": pre == "true",
+    "createdAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "assets": rows,
+}
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, ensure_ascii=False)
+PY
+                else
+                    python3 - "$STATE/release-$TAG.json" "$TAG" "$TITLE" "$PRE" <<'PY'
+import datetime, json, sys
+path, tag, title, pre = sys.argv[1:5]
+data = {
+    "tagName": tag,
+    "name": title,
+    "body": "",
+    "isPrerelease": pre == "true",
+    "createdAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "assets": [],
+}
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, ensure_ascii=False)
+PY
+                fi
+                ;;
+            upload)
+                TAG="${1:-}"
+                shift || true
+                ASSETS=()
+                while [ "$#" -gt 0 ]; do
+                    case "$1" in
+                        --repo) shift 2 ;;
+                        --clobber) shift ;;
+                        *) ASSETS+=("$1"); shift ;;
+                    esac
+                done
+                if [ "${#ASSETS[@]}" -gt 0 ]; then
+                    python3 - "$STATE/release-$TAG.json" "${ASSETS[@]}" <<'PY'
+import hashlib, json, os, sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as fh:
+    data = json.load(fh)
+by_name = {a["name"]: a for a in data.get("assets", [])}
+for item in sys.argv[2:]:
+    if not os.path.isfile(item):
+        continue
+    with open(item, "rb") as fh:
+        digest = hashlib.sha256(fh.read()).hexdigest()
+    by_name[os.path.basename(item)] = {
+        "name": os.path.basename(item),
+        "size": os.path.getsize(item),
+        "digest": "sha256:" + digest,
+        "downloadCount": 0,
+    }
+data["assets"] = list(by_name.values())
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, ensure_ascii=False)
+PY
+                fi
+                ;;
+            delete)
+                TAG="${1:-}"
+                rm -f "$STATE/release-$TAG.json"
+                ;;
+        esac
+        ;;
+    pr)
+        exit 0
+        ;;
+    *)
+        exit 0
+        ;;
+esac

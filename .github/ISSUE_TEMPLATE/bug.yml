@@ -1,0 +1,35 @@
+name: Bug report
+description: Something is broken in the release skill
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Command, expected result, actual result.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: Run `bash release/scripts/release.sh doctor` and paste the output.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Skill version
+      description: Output of `bash release/scripts/release.sh version`.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and bash
+      description: macOS / Linux, `bash --version`.
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Redact tokens and private repo names.
+      render: json

@@ -1,144 +1,182 @@
-# Release Skill — Universal Release Automation for AI Coding Agents
+# Release Skill
 
+[![CI](https://github.com/blackkcold/release-skill/actions/workflows/ci.yml/badge.svg)](https://github.com/blackkcold/release-skill/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/blackkcold/release-skill)](https://github.com/blackkcold/release-skill/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Agent Skills](https://img.shields.io/badge/Agent%20Skills-2.0-blue)](https://agentskills.io)
-[![Claude Code](https://img.shields.io/badge/Claude%20Code-ready-purple)](https://code.claude.com)
+[![Agent Skills 2.0](https://img.shields.io/badge/Agent%20Skills-2.0-blue)](https://agentskills.io)
 [![OpenCode](https://img.shields.io/badge/OpenCode-ready-green)](https://opencode.ai)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-ready-purple)](https://code.claude.com)
+[![Version](https://img.shields.io/badge/version-4.3.0-blue)](CHANGELOG.md)
 
-Automate your entire release workflow — version bump, CHANGELOG update, tag, build, and GitHub Release — with a single command. Works with any agentskills.io-compatible AI coding agent.
+Universal release automation for AI coding agents. One state machine for version analysis, CHANGELOG, commit, build, self-update feed and deltas, annotation tag, GitHub Release, verification and rollback.
 
-## What It Does
+Works with OpenCode, Claude Code, Codex, Gemini CLI, and any agent that can run shell commands.
 
-- **Auto-detect project type**: Swift, Node.js, Rust, Go, Python, Make, Gradle, Flutter, Elixir
-- **Smart CHANGELOG update**: Convert `[Unreleased]` → `[vX.Y.Z] - YYYY-MM-DD`, add new Unreleased section
-- **Intelligent Release Notes**: Auto-detect historical format (bilingual/simple/changelog/structured-cn)
-- **Consistency-first**: Release title, format, and structure inferred from history, not hardcoded
-- **Annotated tags**: Create and push `vX.Y.Z` tags
-- **Optional release branch**: Create `release/vX.Y.Z` branch
-- **Local build**: Execute project build command before release
-- **GitHub Release**: Create release with `gh release create`
-- **CI/CD mode**: Local, CI, or auto-detect
+## What it does
 
-## Quick Install
+- **Plan first** — analyze commits, suggest a semver bump, list dirty files, build command, update-package expectation.
+- **Two gates** — Gate 1 confirms the plan; Gate 2 confirms irreversible actions. Nothing else interrupts.
+- **One commit** — all release content becomes a single `release:` commit; no `git add -A`.
+- **Dual-track** — develop prereleases (`vX.Y.Z-dev.N`) and stable releases; stable only receives reviewed `cherry-pick -x` commits.
+- **Delta-aware** — the previous artifact is staged before the build; a full package is allowed only when the reason is reported.
+- **Resumable** — state outside the repo, stage tracking, directory lock, idempotent tag/Release/assets.
+- **Verifiable** — tag target, asset sha256, feed version and delta presence are checked after publishing.
 
-### Claude Code
+## Install
+
+### Claude Code plugin marketplace
 
 ```bash
-# Via Plugin Marketplace (recommended)
 /plugin marketplace add blackkcold/release-skill
 /plugin install release@blackkcold-release-skill
-
-# Or manual install
-mkdir -p ~/.claude/skills/release
-cp -r release/* ~/.claude/skills/release/
 ```
 
-### OpenCode
+### Manual (any agent)
 
 ```bash
-mkdir -p ~/.config/opencode/skills/release
-cp -r release/* ~/.config/opencode/skills/release/
+git clone https://github.com/blackkcold/release-skill.git
+cd release-skill
+./install.sh                 # OpenCode (default)
+./install.sh --host claude   # Claude Code
+./install.sh --host codex    # Codex
+./install.sh --dir ~/.config/opencode/skills/release
 ```
 
-### Other Tools
+The installer copies `release/` into the host skills directory and backs up an existing install under `${XDG_CONFIG_HOME:-~/.config}/opencode/backups/release/<timestamp>/`.
 
-Copy the `release/` folder to the tool's skills directory. All agentskills.io-compatible tools use the same SKILL.md format.
+### Other tools
 
-## Usage
+Copy the `release/` directory to the tool's skills directory. The entry point is `release/SKILL.md`.
 
-Invoke by mentioning any trigger phrase:
-
-- "发版" / "release" / "发布"
-- "bump version" / "publish"
-- "create release vX.Y.Z"
-
-Or use the slash command: `/release`
-
-### Examples
+## Commands
 
 ```bash
-# Basic release (auto-increment PATCH)
-/release
-
-# Specify version
-/release v0.9.2
-
-# With summary
-/release v0.9.2 backup management bug fix
-
-# Dry run
-/release v0.9.2 --dry-run
-
-# Force config format (skip historical consistency check)
-/release v0.9.2 --force-config
+bash <skill>/scripts/release.sh doctor
+bash <skill>/scripts/release.sh plan --json
+bash <skill>/scripts/release.sh run --yes
+bash <skill>/scripts/release.sh resume --yes
+bash <skill>/scripts/release.sh verify
+bash <skill>/scripts/release.sh rollback --version v1.4.0 --yes
+bash <skill>/scripts/release.sh version
 ```
 
-## Repository Structure
-
-```
-release-skill/
-├── release/
-│   ├── SKILL.md              # The skill definition
-│   ├── README.md             # Skill usage documentation
-│   ├── config/
-│   │   └── projects.json     # Example project configurations
-│   ├── scripts/
-│   │   ├── detect-project.sh  # Project type detection
-│   │   ├── generate-notes.sh # Release note generation
-│   │   └── validate-version.sh # Version validation
-│   └── templates/
-│       ├── changelog-entry.md
-│       ├── release-note-bilingual.md
-│       └── release-note.md
-├── .claude-plugin/
-│   └── plugin.json           # Claude Code Plugin Marketplace config
-├── LICENSE                   # MIT
-└── README.md                 # This file
-```
-
-## Supported Project Types
-
-| Project File | Build Command |
+| Command | Purpose |
 |---|---|
-| `Package.swift` | `swift build -c release` |
-| `package.json` + `build` script | `npm run build` |
-| `Cargo.toml` | `cargo build --release` |
-| `go.mod` | `go build -o ./release/` |
-| `pyproject.toml` | `python -m build` |
-| `Makefile` + `build` target | `make build` |
-| `build.gradle` / `build.gradle.kts` | `./gradlew build` |
-| `pubspec.yaml` | `flutter build` |
-| `mix.exs` | `mix release` |
+| `doctor` | git, remote, provider auth, config, dependencies, disk, branch, version sync |
+| `plan` | read-only plan; `--json` for an agent-rendered page |
+| `run` | execute; requires `--yes` after Gate 1 + Gate 2 |
+| `resume` | continue from the last unfinished stage |
+| `verify` | tag, assets, sha256, feed, delta |
+| `rollback` | delete Release and tag; 24h / download guards |
+| `version` | skill version |
 
-## Release Note Styles
+Exit codes: `0` ok, `10` config, `11` preflight, `12` plan/version, `13` build/feed/delta, `14` publish, `15` verify, `20` aborted.
 
-| Style | Description | Detection Signal |
-|---|---|---|
-| `bilingual` | Chinese/English bilingual format | CJK >50 + Latin >100 chars |
-| `simple` | Single-language format | Default fallback |
-| `changelog` | Raw CHANGELOG entry dump | Body starts with `## [v` |
-| `structured-cn` | Chinese emoji-grouped format | Contains 🐛/✨/🔧 emoji headings |
+## Example plan
+
+```
+📋 发版计划
+  目标:     stable (main)
+  版本:     v1.3.2 → v1.4.0 (minor)
+  变更:     12 提交 + 2 个未提交文件
+  构建:     swift build -c release
+  更新包:   sparkle；上一版产物可获取，预期差分
+  Release:  MyApp v1.4.0 / structured-cn / 正式 Release
+  Provider: github (owner/repo)
+  Host:     opencode
+  配置:     .release.json
+  文档:     CHANGELOG.md README.md
+```
+
+## Example report
+
+```
+📋 发版报告
+  ✅ 版本:   v1.4.0 (正式 Release)
+  ✅ 目标:   stable (main)
+  ✅ Release: https://github.com/owner/repo/releases/tag/v1.4.0
+  ✅ 更新包: 差分 1 个（sparkle，0.9MB / 完整包 10.2MB）
+  ✅ 收尾:   工作区干净
+  📄 报告:   ~/.local/state/release-skill/<repo-id>-report.json
+```
+
+## Architecture
+
+```
+Core        version, docs, commit, tag, state, verify, report
+Provider    github | none (gitlab is a declared, unimplemented contract)
+Build       Swift, Node, Rust, Go, Python, Make, Gradle, Flutter, Elixir, custom
+Feed        none | sparkle | electron | tauri | custom
+Notes       auto | simple | bilingual | changelog | structured-cn
+Host        opencode | claude | codex | gemini | cli
+Config      .release.json → release.config.json → XDG global → legacy → defaults
+```
+
+`SKILL.md` is the operator guide (219 lines). Details live in `release/references/`:
+
+- `config.md` — every field and default
+- `adapters.md` — provider/build/feed/notes/host contracts
+- `delta.md` — seeding, checking, Sparkle/Electron
+- `troubleshooting.md` — doctor, exit codes, resume, rollback
+- `migration.md` — v4.2.0 → v4.3.0
+
+## Delta updates
+
+Build outputs are usually gitignored, so a new worktree or CI job starts without the previous artifact. Feed generators then silently fall back to a full package.
+
+```bash
+bash release/scripts/seed-update-artifacts.sh --previous v1.3.2
+RELEASE_VERSION=v1.4.0 bash scripts/appcast.sh
+bash release/scripts/check-update-delta.sh --version v1.4.0 --feed release/appcast/appcast.xml
+```
+
+- `delta_strategy: auto` allows a full package but reports the reason in the plan and report.
+- `delta_strategy: always` stops before pushing the tag when no delta exists.
+
+## PR flow
+
+`pr_flow: auto` requires a PR when `.github/workflows` exists. The release branch is `release/vX.Y.Z`; CI must pass; the PR is squash-merged; the tag is created on the merged HEAD. Conflicts stop the release with a summary.
 
 ## Configuration
 
-Create `.release.json` in your project root:
+Minimal `.release.json`:
 
 ```json
 {
-  "repo": "owner/repo",
-  "tag_prefix": "v",
-  "build_command": "npm run build",
-  "docs": ["CHANGELOG.md", "README.md"],
-  "release_note_style": "auto",
-  "ci_mode": "local",
-  "release_branch": true
+  "schemaVersion": 1,
+  "provider": "auto",
+  "branch_model": "auto",
+  "stable_branch": "main",
+  "dev_branch": "develop",
+  "update_feed": "auto",
+  "notes_style": "auto",
+  "delta_strategy": "auto"
 }
 ```
 
-## License
+See [release/references/config.md](release/references/config.md).
 
-MIT — see [LICENSE](LICENSE).
+## Development
+
+```bash
+bash tests/run.sh
+bash scripts/check-version-sync.sh
+```
+
+The suite uses fixture repositories and a `gh` stub; it never touches the network.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
+## Security
+
+See [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
-PRs welcome! Submit to this repository or to [anthropics/skills](https://github.com/anthropics/skills).
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+MIT
