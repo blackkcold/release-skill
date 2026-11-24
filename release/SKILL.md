@@ -1,640 +1,219 @@
 ---
 name: release
-description: >
-  Universal release automation for any semver project. Auto-detect project type
-  (Swift, Node.js, Rust, Go, Python, etc.), update CHANGELOG/README, create
-  annotated tags, and generate GitHub Releases with smart release notes.
-  Supports bilingual/simple/changelog/structured-cn note styles with historical
-  consistency detection. Triggers: "release", "发版", "发布", "bump version",
-  "publish", "create release".
+description: 通用发版助手：分析变更、判定语义化版本、更新 CHANGELOG、提交、构建、生成自更新 feed 与差分、打 tag、创建 GitHub Release，支持 develop 预发布 / main 稳定双轨、失败续跑与回滚。触发词：发版、发布、release、bump version、版本号、大版本、重大更新、发版 vX.Y.Z、同步 main、差分更新、增量更新、appcast、blockmap。
 license: MIT
 compatibility: opencode, claude-code, codex, gemini-cli, macOS, Linux
 metadata:
-  version: "2.0.0"
-  optimized_for: "slash-command, release-automation, git-workflow"
+  version: "4.3.0"
+  author: blackkcold
+  repository: https://github.com/blackkcold/release-skill
+  tags: "release, versioning, git, github, ci-cd, automation, delta-update"
 ---
+# Release — 通用发版助手
 
-# Release - 通用发版助手
+发版是低频、高后果、顺序敏感的操作。本 skill 把「分析 → 计划 → 文档 → 提交 → 构建 → feed → tag → Release → 验证」做成可续跑的状态机，最多两次确认。
 
-自动化版本发布流程，适用于任何使用语义化版本的项目。
+## 何时使用
 
-## When to Use
+- 中文：发版、发布、准备发版、更新版本、发版 vX.Y.Z、大版本、重大更新、同步 main
+- English：release, bump version, publish, create release
+- 自更新：差分更新、增量更新、appcast、blockmap
 
-### 中文触发词
-- "发版"、"发布"、"release"
-- "准备发版"、"更新版本"
-- "发布新版本"、"发布 vX.Y.Z"
-- "大版本"（递增 MINOR）
-- "重大更新"（递增 MAJOR）
+## 核心原则
 
-### 英文触发词
-- "release", "bump version"
-- "create release", "publish"
-- "release vX.Y.Z"
+1. **一致性** — Release Note 的标题、格式、分组跟随最近历史 Release；配置只是 fallback。
+2. **一次提交** — 本版所有内容（含发版前已存在的脏文件）合并为一个 `release:` 提交，不用 `git add -A`。
+3. **两次闸门** — Gate 1 确认计划，Gate 2 确认不可逆动作；其余阶段不打断。
+4. **发版后必须干净** — 提交后与收尾时 `git status` 都要干净（排除 `ignore_dirty`）。
+5. **双轨不混** — 有 dev 线时默认发 develop；进入 main 只允许已验收提交 `cherry-pick -x`，禁止整支合并。
+6. **差分优先** — 构建前先让上一版产物就位；退回完整包可以，但必须写明原因，不许静默降级。
+7. **单一版本源** — `release/VERSION` 是权威版本；`metadata.version`、plugin.json、CHANGELOG、tag 必须一致。
 
-## When NOT to Use
 
-- 项目不使用 Git
-- 项目没有 GitHub remote
-- 用户只想打 tag 不想发完整 release
+## 入口
 
----
+所有命令都在项目根目录执行：
 
-## 一致性原则（最高优先级）
-
-> **核心思想：Release Note 的标题、格式、结构必须与项目历史 Release 保持一致。配置是 fallback，不是覆盖。**
-
-### 优先级链
-
-```
-1. 历史 Release 实际格式（最高 — 一致性原则）
-2. .release.json 中的 release_note_style（次之 — 仅当历史不可用时）
-3. auto 自动检测（fallback — 仅当配置为 auto 且无历史）
-4. 默认格式 simple（最低 — 兜底）
+```bash
+bash <skill>/scripts/release.sh <command> [options]
 ```
 
-### 标题一致性
-
-Release 标题从历史 Release 推断，不硬编码格式：
-
-| 历史标题模式 | 推断规则 | 示例 |
-|---|---|---|
-| `{Project} vX.Y.Z` | 提取产品名前缀，新版本沿用 | `NewsBar v2.0.5` |
-| `vX.Y.Z`（无产品名） | 保持纯版本号 | `v2.0.5` |
-| 其他格式 | 保持历史格式 | 沿用 |
-
-**检测方法**：提取最近 3 个 Release 的 `name` 字段，取出现频率最高的模式。
-
-### 格式一致性
-
-Release Body 格式从历史 Release 推断：
-
-| 历史特征 | 判定格式 |
+| 命令 | 作用 |
 |---|---|
-| 含 `# {Project} vX.Y.Z` 标题 + 中英双语摘要 + 双语 emoji 分组标题 | `bilingual` |
-| 含 emoji 分组标题（🐛/✨/🔧）但无英文对照 | `structured-cn` |
-| 含 `## [v` 或 `### Added` 等 Keep-a-Changelog 标题 | `changelog` |
-| 以上均不匹配 | `simple` |
+| `doctor` | git / remote / provider 认证 / 配置 / 依赖 / 磁盘 / 分支 / 版本同步 |
+| `plan` | 只读分析，输出计划；`--json` 供 Agent 渲染计划页 |
+| `run` | 执行；Agent 在 Gate 1 + Gate 2 确认后调用 `run --yes` |
+| `resume` | 从最后一个未完成阶段继续 |
+| `verify` | 校验 tag、资产 sha256、feed 版本、差分 |
+| `rollback` | 删除 Release 与 tag（24h / 下载量保护） |
+| `version` | 打印 skill 版本 |
 
-**关键规则**：当 `.release.json` 配置的 `release_note_style` 与历史格式推断结果冲突时，**历史格式优先**。配置仅在以下情况生效：
-- 项目首次发版（无历史 Release）
-- 历史格式无法识别（少于 3 个历史 Release）
-- 用户显式指定 `--force-config` 标志
+常用选项：`--version vX.Y.Z`、`--target auto|develop|stable`、`--repo-dir`、`--json`、`--dry-run`、`--yes`、`--force`、`--update`、`--skip-build`、`--skip-release`、`--through`。
 
-### 摘要一致性
+退出码：`0` 成功、`10` 配置、`11` 预检、`12` 计划/版本、`13` 构建/差分、`14` 发布、`15` 验证、`20` 中止。
 
-如果历史 Release 包含一句话摘要（中英双语或单语），新版本必须包含相同结构的摘要。摘要来源优先级：
 
-```
-1. 用户在发版命令中指定的摘要
-2. .release.json 中的 summary/summary_en
-3. 从 commit messages 或 CHANGELOG 自动提取
-```
-
-### 分组标题一致性
-
-emoji 分组标题从历史 Release 提取，保持相同的 emoji 和中英文对照（如历史有）。不自行创造新的分组标题。
-
----
-
-## 配置检测
-
-### 配置文件优先级
+## 工作流
 
 ```
-1. 项目根目录 .release.json（最高优先级）
-2. 项目根目录 release.config.json
-3. ~/.config/opencode/release.json（全局配置）
-4. 自动检测（无配置文件时）
+Phase 0  doctor                  环境一次查完；失败给可执行修复命令
+Phase 1  plan                    变更分类、版本建议、目标线、构建、更新包预期
+Gate 1   🔒 计划确认             唯一计划页：目标、版本、待提交文件、构建、差分预期
+Phase 2  docs + commit           CHANGELOG / 版本文件；一次 release 提交
+Phase 3  clean gate              排除 ignore_dirty 后工作区必须为空
+Gate 2   🔒 不可逆确认           推送、tag、构建、feed、Release、资产一次打包
+Phase 4  seed → build → feed     上一版产物先就位，再构建、生成 feed
+Phase 5  delta                   差分判定；always 无差分即停
+Phase 6  PR merge（可选）        先合并 PR，再在目标线 HEAD 打 tag
+Phase 7  tag → push → Release    本地 tag 先建；差分通过后才推
+Phase 8  verify → report         tag 指向、资产 sha256、feed、差分逐项打勾
+Phase 9  resume / rollback       失败续跑；高风险回滚有保护
 ```
 
-### .release.json 格式
+### Gate 1 — 计划页
+
+Agent 调用 `release.sh plan --json`，渲染：
+
+- 目标线（develop / stable）与分支
+- 上一版 → 本次版本，bump 理由（BREAKING / feat / 其余）
+- 提交数、待提交文件（逐条）、`ignore_dirty` 排除项
+- 构建命令、feed 类型、差分预期或完整包原因
+- PR 流程、Release 标题与格式
+
+确认后调用 `release.sh run --yes`；未确认时 CLI 只打印计划并退出。
+
+### Gate 2 — 不可逆动作
+
+`run` 内部按顺序执行；`delta_strategy=always` 时 seed 不通过会在构建前停止：
+
+1. seed 上一版产物（本地 → 主 checkout → GitHub 资产）
+2. 构建
+3. 生成 feed
+4. 差分判定
+5. 工作区干净复核
+6. 推送 tag
+7. 创建 Release 并上传 feed / 差分 / 额外资产
+
+
+## 配置
+
+优先级（后者覆盖前者）：
+
+1. `release/config/default.json`（内置）
+2. `~/.config/opencode/release.json`（旧路径，仍读取，打印弃用提示）
+3. `${XDG_CONFIG_HOME:-~/.config}/release-skill/config.json`
+4. 项目 `release.config.json`
+5. 项目 `.release.json`
+
+最小配置：
 
 ```json
 {
-  "repo": "owner/repo",
-  "tag_prefix": "v",
-  "build_command": "npm run build",
-  "release_command": null,
-  "test_command": null,
-  "docs": ["CHANGELOG.md", "README.md"],
-  "changelog_format": "keep-a-changelog",
-  "ci_mode": "local",
-  "release_branch": true,
-  "auto_merge": false,
-  "release_note_style": "auto",
-  "summary": "",
-  "summary_en": "",
-  "validation": ""
+  "schemaVersion": 1,
+  "provider": "auto",
+  "branch_model": "auto",
+  "stable_branch": "main",
+  "dev_branch": "develop",
+  "update_feed": "auto",
+  "notes_style": "auto",
+  "delta_strategy": "auto"
 }
 ```
 
-**字段说明**：
+完整字段、默认值、兼容字段见 `references/config.md`；适配器契约见 `references/adapters.md`。
 
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `repo` | string | 自动检测 | GitHub 仓库 `owner/repo` |
-| `tag_prefix` | string | `"v"` | Tag 前缀，如 `v1.0.0` |
-| `build_command` | string\|null | 自动检测 | 构建命令 |
-| `release_command` | string\|null | null | 发布命令（优先于 build_command） |
-| `test_command` | string\|null | null | 测试命令（可选） |
-| `docs` | string[] | `["CHANGELOG.md"]` | 需更新的文档列表 |
-| `changelog_format` | string | `"keep-a-changelog"` | CHANGELOG 格式 |
-| `ci_mode` | string | `"local"` | CI/CD 模式 |
-| `release_branch` | boolean | true | 是否创建 release 分支 |
-| `auto_merge` | boolean | false | 是否自动合并到 main（不推荐） |
-| `release_note_style` | string | `"auto"` | Release Note 格式：`auto`/`bilingual`/`simple`/`changelog`/`structured-cn` |
-| `summary` | string | 空 | 中文发版摘要（bilingual 模式使用） |
-| `summary_en` | string | 空 | 英文发版摘要（bilingual 模式使用） |
-| `validation` | string | 空 | 验证步骤描述（如 "swift build 通过"） |
+### 目标线
 
-### 自动检测规则
+- `branch_model: auto`：只有「dev 分支存在」且「有 dev tag 或显式 target_branch」才走双轨；普通仓库默认单轨。
+- 显式 `--target develop|stable` 覆盖配置。
+- stable 版本独立判定，不继承 dev 版本号。
 
-| 项目特征 | 构建命令 | 说明 |
-|---------|---------|------|
-| `Package.swift` | `swift build -c release` | Swift 项目 |
-| `package.json` + `build` script | `npm run build` | Node.js 项目 |
-| `Cargo.toml` | `cargo build --release` | Rust 项目 |
-| `go.mod` | `go build -o ./release/` | Go 项目 |
-| `pyproject.toml` | `python -m build` | Python 项目 |
-| `Makefile` + `build` target | `make build` | 通用项目 |
-| `build.gradle` / `build.gradle.kts` | `./gradlew build` | Gradle 项目 |
-| `pubspec.yaml` | `flutter build` | Flutter 项目 |
-| `mix.exs` | `mix release` | Elixir 项目 |
+### 版本判定
 
-### Release 命令检测
+`BREAKING_COUNT > 0` → major；`FEAT_COUNT > 0` → minor；其余 → patch。
+非 Conventional 前缀不猜语义，统一 patch。显式 `--version` 优先。
 
-```
-优先级：
-1. .release.json 中的 release_command
-2. scripts/release.sh 存在
-3. Makefile + release target
-4. 默认使用 build_command
-```
 
----
+## 适配器
 
-## Version 规则
+| 层 | 可替换点 | v4.3 |
+|---|---|---|
+| Provider | Release / PR / 认证 / 资产 | `github`、`none`；`gitlab` 明确报未实现 |
+| Build | 项目类型与命令 | Swift / Node / Rust / Go / Python / Make / Gradle / Flutter / Elixir / custom |
+| Feed | 自更新 feed 与差分 | `none` / `sparkle` / `electron` / `tauri` / `custom` |
+| Notes | Release Note 格式 | `auto` / `simple` / `bilingual` / `changelog` / `structured-cn` |
+| Host | 渲染与提问 | Agent 渲染计划页；CLI 文本；CI 用 `--yes` |
 
-### 版本号格式
+新增适配器只改对应 lib，不改主流程。
 
-```
-vX.Y.Z
-```
 
-- **X (MAJOR)**: 大重构 / 不兼容变更
-- **Y (MINOR)**: 新功能
-- **Z (PATCH)**: Bug 修复
+## 差分更新（关键）
 
-### 自动递增规则
-
-| 场景 | 递增方式 | 示例 |
-|------|---------|------|
-| 用户指定版本 | 使用用户指定的 | v0.9.2 |
-| 用户说"发版"但未指定 | 自动递增 PATCH | v0.9.1 → v0.9.2 |
-| 用户说"大版本" | 递增 MINOR | v0.9.1 → v0.10.0 |
-| 用户说"重大更新" | 递增 MAJOR | v0.9.1 → v1.0.0 |
-
-### 版本验证
+上一版产物通常被 gitignore，新 worktree / 新 CI job / 另一台机器默认没有它。feed 生成器不会报错，只会静默退回完整包。
 
 ```bash
-# 验证格式
-[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+# 1. 取上一版产物（只读；落点必须被 gitignore）
+bash scripts/seed-update-artifacts.sh --previous vX.Y.(Z-1)
 
-# 验证递增（对比最新 tag）
-latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+# 2. 生成 feed（项目命令）
+RELEASE_VERSION=vX.Y.Z bash scripts/appcast.sh
+
+# 3. 判定
+bash scripts/check-update-delta.sh --version vX.Y.Z --feed <feed> --archive <dir>
 ```
 
----
+- `delta_strategy=auto`：允许完整包，但计划页与报告必须写明原因。
+- `delta_strategy=always`：没有差分就停止，远端不会留下指向未发布版本的 tag。
+- 资产必须带 sha256；下载中断的截断文件会被丢弃。
 
-## Workflow
+详见 `references/delta.md`。
 
-```
-Phase 1: 环境检测
-  ├── 检测当前目录是否为 Git 仓库
-  ├── 检测是否有 GitHub remote
-  ├── 加载配置文件（.release.json）
-  ├── 如无配置，自动检测项目类型
-  ├── 检测当前最新 tag
-  └── 确定目标版本号
 
-Phase 2: 文档更新（自动）
-  ├── 检测存在的文档文件
-  ├── 更新 CHANGELOG.md（如存在）
-  │   ├── 将 ## [Unreleased] 转为 ## [vX.Y.Z] - YYYY-MM-DD
-  │   ├── 在顶部新增 ## [Unreleased]
-  │   └── 更新底部版本链接
-  ├── 更新 README.md（如存在）
-  │   └── 更新版本引用
-  └── 更新其他配置的文档
+## 状态、续跑与回滚
 
-Phase 2.5: Release Note 生成（自动）
-  ├── 一致性检测（最高优先级）
-  │   ├── 提取最近 3 个 Release 的 name 字段 → 推断标题模式
-  │   ├── 提取最近 3 个 Release 的 body → 推断格式（bilingual/structured-cn/changelog/simple）
-  │   └── 历史 vs 配置冲突时，历史优先（参见「一致性原则」章节）
-  ├── 检查 .release.json 中的 release_note_style
-  │   └── 仅当历史不可用或用户显式 --force-config 时使用配置值
-  ├── 若为 "auto" 或无配置且无历史，通过以下规则判定：
-  │   ├── 分析中英文字符比例 → bilingual（CJK >50 且 Latin >100）
-  │   ├── 分析是否含 emoji 分组标题（🐛/✨/🔧） → structured-cn
-  │   ├── 分析是否含 Keep-a-Changelog 标题 → changelog
-  │   └── 无法判断 → 回退到 simple
-  ├── 从 CHANGELOG 提取 vX.Y.Z 条目
-  ├── 按检测格式生成 Release Body（标题、摘要、分组标题均遵循历史模式）
-  ├── 输出预览路径，提示用户后续确认
-  └── 将 body 写入临时文件供 Phase 7 使用
-
-Phase 3: 创建 Release 分支（可选）
-  ├── 检查 release_branch 配置
-  ├── 如启用，创建 release/vX.Y.Z 分支
-  └── 提交文档更新
-
-Phase 4: 打 Tag 并推送（需确认）
-  ├── 在当前分支打 annotated tag
-  ├── 展示 tag 信息，等待用户确认
-  └── 推送 tag 到 origin
-
-Phase 5: 推送分支（需确认）
-  ├── 展示待推送的分支
-  ├── 用户确认后推送
-  └── 如为 CI 模式，流程结束
-
-Phase 6: 本地构建（需确认，local 模式）
-  ├── 检查 build_command 配置
-  ├── 展示构建命令
-  ├── 用户确认后执行构建
-  └── 验证构建产物
-
-Phase 7: GitHub Release（需确认）
-  ├── 加载 Phase 2.5 生成的 Release Body
-  ├── 展示完整 Release Note 预览
-  ├── 用户可选（编辑 / 接受 / 跳过）
-  ├── 通过 `gh release create` 或 GitHub API 创建 Release
-  │   ├── 标题只使用版本号：`--title "vX.Y.Z"`（不含描述）
-  │   ├── local 模式：附带本地构建产物（.zip/.dmg）
-  │   ├── ci 模式：仅创建 Release（产物由 CI 上传）
-  │   └── 使用 `--notes-file` 传入预先填写的 body（描述内容在 body 中）
-  ├── 验证 Release 创建成功
-  └── 若失败，提示手动兜底方案
-
-Phase 8: 收尾
-  ├── 输出发版报告
-  ├── 如启用 release_branch，提示手动合并
-  └── 提示下一步操作
-```
-
----
-
-## CI/CD 模式
-
-### 模式说明
-
-| 模式 | 行为 | 适用场景 |
-|------|------|---------|
-| `local` | 本地完成全流程（默认） | 无 CI/CD 的项目 |
-| `ci` | 只打 tag 和推送，由 CI 完成构建和发布 | 有 GitHub Actions 等 |
-| `auto` | 自动检测 `.github/workflows` 存在则用 CI 模式 | 智能切换 |
-
-### CI 模式流程
-
-```
-Phase 1-3: 同 local 模式
-Phase 4: 打 Tag 并推送
-Phase 5: 推送分支（如启用）
-Phase 6: 跳过本地构建
-Phase 7: 创建 GitHub Release（可选，由 CI 创建则跳过）
-Phase 8: 收尾，提示 CI 将自动完成后续
-```
-
----
-
-## 文档更新规则
-
-### CHANGELOG.md 更新
-
-**支持的格式**：
-
-1. **Keep a Changelog**（默认）
-```markdown
-## [Unreleased]
-
-### Added
-- ...
-
-## [vX.Y.Z] - YYYY-MM-DD
-```
-
-2. **Simple**
-```markdown
-## Unreleased
-
-- ...
-
-## vX.Y.Z - YYYY-MM-DD
-```
-
-3. **None**（不自动更新 CHANGELOG）
-
-### README.md 更新
-
-- 检测版本引用（如 `v0.9.1`）并更新为新版本
-- 不强制添加徽章（除非已有）
-
----
-
-## Release Note 格式
-
-### 自动检测逻辑
-
-> **重要**：以下检测仅在「一致性原则」无法从历史 Release 推断格式时作为 fallback 使用。历史格式优先于本节逻辑。
-
-当 `release_note_style` 为 `auto`（默认）且无历史 Release 可参考时，Skill 通过 GitHub Releases API 提取最近 3 个 Release Body，按以下规则判定格式：
-
-| 检测条件 | 判定格式 | 典型特征 |
-|---------|---------|---------|
-| CJK 字符 >50 且 Latin 字符 >100 | `bilingual` | 中英双语段落交替 |
-| Body 含 emoji 分组标题（🐛/✨/🔧/🔐/♿） | `structured-cn` | 结构化中文 emoji 分组格式 |
-| Body 含 `## [v` 格式标题 | `changelog` | 直接复制 CHANGELOG 条目 |
-| 以上均不匹配 | `simple` | 通用单语言格式 |
-
-### 四种格式
-
-#### `bilingual` — 中英双语格式
-
-适用于维护中英文 Release Notes 的项目。Body 从 CHANGELOG 的 `### Added`/`### Changed`/`### Fixed` 分组自动生成，每个分组拆分为中文/英文小节。
-
-```markdown
-# vX.Y.Z Release Notes
-
-[Project] vX.Y.Z。[一句话中文摘要]。
-[Project] vX.Y.Z. Core upgrade: [one-line English summary].
-
----
-
-## [Section 中文] / [Section English]
-
-- 中文要点
-- English point
-
-**涉及文件 / Files**: `File.swift`
-
----
-
-## 验证 / Validation
-
-- {validation}
-
----
-
-**完整 CHANGELOG**: [link]
-**Full Changelog**: compare/{prev}...{version}
-```
-
-#### `simple` — 通用单语格式
-
-```markdown
-# vX.Y.Z Release Notes
-
-[Project] vX.Y.Z.
-
----
-
-## Changes
-
-- point 1
-
----
-
-## Validation
-
-- {validation}
-
----
-
-**Full Changelog**: compare/{prev}...{version}
-```
-
-#### `changelog` — 纯 CHANGELOG 格式
-
-```markdown
-{CHANGELOG 条目原文}
-
----
-
-**Full Changelog**: compare/{prev}...{version}
-```
-
-#### `structured-cn` — 结构化中文 emoji 分组格式
-
-适用于中文项目，按 commit 前缀自动分组为 emoji 章节。生成逻辑：
-
-1. 从 `git log {prev}..HEAD --no-merges --format="%s"` 提取 commit message
-2. 按 Conventional Commits 前缀自动分组：
-
-| 前缀 | emoji | 章节标题 |
-|------|-------|---------|
-| `fix:` | 🐛 | 修复 |
-| `feat:` | ✨ | 新增 / 新功能 |
-| `refactor:` | ♻️ | 重构 |
-| `docs:` | 📝 | 文档 |
-| `perf:` | ⚡ | 性能优化 |
-| `test:` | ✅ | 测试 |
-| `ci:` | 🔄 | CI/CD |
-| `build:` | 📦 | 构建 |
-| `chore:` | 🔧 | 杂项 / 改进 |
-| `release:` | 🚀 | 发布 |
-| `security:` | 🔐 | 安全 |
-| 无前缀 | 🔧 | 其他 |
-
-3. 清理 commit message：去掉前缀标记，首字母大写，移除末尾句号
-
-```markdown
-vX.Y.Z — 简短描述
-
-🐛 修复
-- API Key 启动同步加载：确保定时器触发时 API Key 已就绪
-- Dashboard force unwrap 修复：消除潜在的崩溃风险
-
-✨ 新增
-- SHA256 digest 校验：通过 GitHub Release asset digest 字段获取校验值
-
-🔧 改进
-- 指数退避重试：重试间隔改为 1s → 2s → 4s 指数增长
-- 日志增强：获取数据源失败时增加 NSLog 输出
-
----
-
-**Full Changelog**: compare/{prev}...{version}
-```
-
-> **注意**：若 `scripts/release.sh` 存在，应调用该脚本生成 Release Note；若不存在，Skill 应按上述规则自行生成。
-
-### `.release.json` 配置
-
-```json
-{
-  "release_note_style": "bilingual",
-  "summary": "新增备份管理功能",
-  "summary_en": "New backup management feature",
-  "validation": "swift build + swift test 通过"
-}
-```
-
-若未配置 `summary`/`summary_en`，Skill 会从 CHANGELOG 的 `> 摘要行` 自动提取。
-
----
-
-## Git 操作规范
-
-### 分支命名
-
-```
-release/vX.Y.Z（如启用 release_branch）
-```
-
-### Commit 消息格式
-
-```
-release: vX.Y.Z — 简要描述
-```
-
-### Tag 格式
+状态文件：`${XDG_STATE_HOME:-~/.local/state}/release-skill/<repo-id>.json`
 
 ```bash
-git tag -a vX.Y.Z -m "vX.Y.Z — 简要描述"
+release.sh run --yes        # 失败后状态保留
+release.sh resume --yes     # 从失败阶段继续
+release.sh verify           # 校验 tag / 资产 / feed / 差分
+release.sh rollback --yes   # 24h 内且下载量低于阈值才允许
 ```
 
-### GitHub Release 标题格式
+幂等：tag 已存在且指向 HEAD 则跳过；Release 已存在只允许 `--update` 更新说明；资产 sha256 一致则跳过。
 
-标题格式从历史 Release 推断（参见「一致性原则」章节）：
 
-```
-{推断的标题模式} vX.Y.Z
-```
+## PR 流程
 
-**推断规则**：
-- 历史标题含产品名前缀 → `{Product} vX.Y.Z`（如 `NewsBar v2.0.5`）
-- 历史标题为纯版本号 → `vX.Y.Z`
-- 无历史 → 默认 `vX.Y.Z`
+- `pr_flow: auto`：有 `.github/workflows` 视为需要 PR；`always` 强制；`never` 直接在当前分支。
+- 场景 A：`release/vX.Y.Z → 目标线`，CI 通过且无冲突自动 squash 合并；有冲突停止并给摘要。
+- 场景 B：发版后只输出可清理清单，不自动删除。
+- 合并后 checkout 目标线、pull、在 HEAD 打 tag。
 
-> **注意**：描述内容放在 Release Body 中（通过 `--notes-file` 传入），不出现在标题中。
 
-### 推送命令
+## 错误处理
 
-```bash
-git push origin vX.Y.Z  # 推送 tag
-git push origin release/vX.Y.Z  # 推送 release 分支（如启用）
-```
+| 场景 | 处理 |
+|---|---|
+| 无变更 | 停止，提示无需发版 |
+| 版本格式 / 未递增 | `validate-version.sh` 报错，给正确格式 |
+| 工作区不干净 | 停止，列文件，三选项：并入 / ignore_dirty / 手动处理 |
+| 构建失败 | 保留状态，`resume` 续跑；不改源码 |
+| 上一版产物取不到 | 明确报完整包与原因；`always` 时停止 |
+| feed 无本版版本号 | 停止，检查 feed 命令与版本注入 |
+| Release 失败 | 给原因与手动兜底命令；状态可续跑 |
+| PR 冲突 / CI 失败 | 展示摘要与诊断；需改源码则停 |
+| 回滚超窗 / 下载量高 | 默认拒绝，确认风险后 `--force` |
 
----
 
-## 安全边界
+## 参考文件（按需加载）
 
-| 操作 | 权限 | 说明 |
-|------|------|------|
-| 读取配置/文档 | ✅ 自动 | 读取 .release.json、CHANGELOG 等 |
-| 修改文档 | ✅ 自动 | 更新版本号、日期 |
-| 创建分支 | ✅ 自动 | release/vX.Y.Z（如启用） |
-| 提交代码 | ✅ 自动 | 在当前分支上提交 |
-| 打 tag | ⚠️ 需确认 | 展示 tag 信息后确认 |
-| 推送 tag | ⚠️ 需确认 | 推送到 origin |
-| 推送分支 | ⚠️ 需确认 | 推送 release 分支 |
-| 本地构建 | ⚠️ 需确认 | 展示构建命令后确认 |
-| 创建 Release | ⚠️ 需确认 | 展示 Release Note 预览后确认 |
-| **合并分支** | ❌ 不执行 | **用户手动合并** |
+- `references/config.md` — 全部字段、默认值、配置优先级、兼容字段
+- `references/adapters.md` — provider / build / feed / notes / host 契约与扩展方式
+- `references/delta.md` — 差分产物、校验、Sparkle / Electron 细节
+- `references/troubleshooting.md` — doctor 检查项、退出码、resume / rollback
+- `references/migration.md` — v4.2.0 → v4.3.0 迁移与兼容
 
----
+## 输出
 
-## Error Handling
-
-| 错误场景 | 处理方式 |
-|---------|---------|
-| 不是 Git 仓库 | 提示用户切换到项目目录 |
-| 没有 GitHub remote | 提示用户添加 remote |
-| 版本号格式错误 | 提示正确格式 vX.Y.Z |
-| 版本已存在 | 提示冲突，建议新版本号 |
-| CHANGELOG 无 Unreleased | 提示先添加变更记录 |
-| Git 工作区不干净 | 提示先提交或 stash |
-| 构建失败 | 提示构建错误，询问是否继续 |
-| 推送失败 | 提示网络问题，建议重试 |
-| Release 创建失败 | 提示手动兜底方案 |
-
----
-
-## Output Format
-
-```
-📋 发版报告 - vX.Y.Z
-
-✅ 文档更新:
-   - CHANGELOG.md: Unreleased → vX.Y.Z
-   - README.md: 更新版本引用
-
-✅ Release Note:
-   - 检测格式: {auto|bilingual|simple|changelog|structured-cn}
-   - Body: 已生成预览
-
-✅ Tag:
-   - Tag: vX.Y.Z
-   - 推送: 已推送到 origin
-
-✅ Release 分支（如启用）:
-   - 分支: release/vX.Y.Z
-   - 推送: 已推送到 origin
-
-✅ 本地构建（如执行）:
-   - 命令: {build_command}
-   - 状态: 成功
-
-✅ GitHub Release:
-   - URL: https://github.com/{owner}/{repo}/releases/tag/vX.Y.Z
-   - Release Note: 已生成
-
-⚠️ 待办（如启用 release_branch）:
-   - 手动合并 release/vX.Y.Z 到 main:
-     git checkout main
-     git merge release/vX.Y.Z --no-edit
-     git push origin main
-
-📌 下一步:
-   - 验证 GitHub Release 页面
-   - 开始下一版本开发: v{next_version}
-```
-
----
-
-## Guardrails
-
-- 不自动删除 release 分支
-- 不自动合并到 main
-- Git 操作（tag、push）必须展示摘要后确认
-- Release 创建必须展示 Release Note 预览后确认
-- 构建失败时询问用户是否继续
-- 不修改源代码文件，只更新文档
-- 推送操作必须用户确认
-
----
-
-## 示例调用
-
-```bash
-# 基本发版（自动递增 PATCH）
-skill(name="release", user_message="发版")
-
-# 指定版本号
-skill(name="release", user_message="发版 v0.9.2")
-
-# 带摘要
-skill(name="release", user_message="发版 v0.9.2 备份管理 bug 修复")
-
-# 试运行
-skill(name="release", user_message="发版 v0.9.2 --dry-run")
-
-# 强制使用配置格式（跳过历史一致性检测）
-skill(name="release", user_message="发版 v0.9.2 --force-config")
-
-# 英文触发
-skill(name="release", user_message="release v0.9.2")
-skill(name="release", user_message="bump version")
-```
+优先渲染「发版计划页」与「发版报告页」；文本只留结论。报告含：两条线结果、tag/Release 链接、差分数量与节省比例（或完整包原因）、cherry-pick 清单、可清理项。

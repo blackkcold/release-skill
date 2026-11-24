@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "provider": "github",
+  "repo": "blackkcold/release-skill",
+  "branch_model": "single",
+  "stable_branch": "main",
+  "project_name": "Release Skill",
+  "release_title": "{name} {tag}",
+  "summary": "Universal release automation",
+  "build_command": "bash scripts/build-dist.sh",
+  "docs": ["CHANGELOG.md", "README.md", "README.zh-CN.md"],
+  "version_files": [
+    "release/VERSION",
+    "release/SKILL.md:frontmatter",
+    ".claude-plugin/plugin.json:json"
+  ],
+  "notes_style": "changelog",
+  "release_branch": true,
+  "pr_flow": "always",
+  "update_feed": "none",
+  "release_assets": "dist/release-skill-*.zip,dist/release-skill-*.zip.sha256",
+  "ignore_dirty": [".release.json", "dist/", ".DS_Store", "*.log"]
+}

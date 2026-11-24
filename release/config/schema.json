@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/blackkcold/release-skill/release/config/schema.json",
+  "title": "release-skill configuration",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "provider": { "type": "string", "enum": ["auto", "github", "none", "gitlab"] },
+    "repo": { "type": "string" },
+    "tag_prefix": { "type": "string", "minLength": 0 },
+    "branch_model": { "type": "string", "enum": ["auto", "single", "dual"] },
+    "stable_branch": { "type": "string", "minLength": 1 },
+    "dev_branch": { "type": "string", "minLength": 1 },
+    "dev_tag_suffix": { "type": "string" },
+    "target_branch": { "type": "string" },
+    "version_strategy": { "type": "string", "enum": ["conventional", "semver", "auto"] },
+    "project_name": { "type": "string" },
+    "release_title": { "type": "string" },
+    "build_command": { "type": ["string", "null"] },
+    "build_command_dev": { "type": ["string", "null"] },
+    "build_command_stable": { "type": ["string", "null"] },
+    "release_command": { "type": ["string", "null"] },
+    "test_command": { "type": ["string", "null"] },
+    "docs": { "type": "array", "items": { "type": "string" } },
+    "version_files": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+              "path": { "type": "string" },
+              "kind": { "type": "string", "enum": ["version", "json", "frontmatter", "text"] }
+            },
+            "additionalProperties": true
+          }
+        ]
+      }
+    },
+    "changelog_format": { "type": "string" },
+    "notes_style": { "type": "string", "enum": ["auto", "simple", "bilingual", "changelog", "structured-cn"] },
+    "release_note_style": { "type": ["string", "null"] },
+    "ci_mode": { "type": "string", "enum": ["local", "ci", "auto"] },
+    "release_branch": { "type": "boolean" },
+    "pr_flow": { "type": "string", "enum": ["auto", "always", "never"] },
+    "pr_cleanup": { "type": "string", "enum": ["report", "off"] },
+    "pr_cleanup_stale_days": { "type": "integer", "minimum": 1 },
+    "main_sync": { "type": "string", "enum": ["ask", "never"] },
+    "experimental_paths": { "type": "array", "items": { "type": "string" } },
+    "experimental_keywords": { "type": "array", "items": { "type": "string" } },
+    "update_feed": { "type": "string", "enum": ["auto", "none", "sparkle", "electron", "tauri", "custom"] },
+    "update_feed_command": { "type": ["string", "null"] },
+    "update_feed_file": { "type": ["string", "null"] },
+    "update_archive_dir": { "type": "string" },
+    "update_previous_dir": { "type": ["string", "null"] },
+    "update_artifact_glob": { "type": "string" },
+    "release_assets": { "type": "string" },
+    "delta_strategy": { "type": "string", "enum": ["auto", "always", "off"] },
+    "delta_max": { "type": "integer", "minimum": 1 },
+    "ignore_dirty": { "type": "array", "items": { "type": "string" } },
+    "host": { "type": "string", "enum": ["auto", "opencode", "claude", "codex", "gemini", "cli"] },
+    "lock_timeout_hours": { "type": "integer", "minimum": 1 },
+    "rollback_window_hours": { "type": "integer", "minimum": 1 },
+    "rollback_max_downloads": { "type": "integer", "minimum": 0 }
+  }
+}
